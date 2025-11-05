@@ -1,0 +1,16 @@
+<project>
+<groupId>edu.colostate</groupId>
+<artifactId>pa3</artifactId>
+<modelVersion>4.0.0</modelVersion>
+<name>Programming Assignment 3</name>
+<packaging>jar</packaging>
+<version>1.0</version>
+<dependencies>
+    <dependency>
+        <!--These are the main spark dependencies-->
+        <groupId>org.apache.spark</groupId>
+        <artifactId>spark-sql_2.11</artifactId>
+        <version>2.4.0</version>
+    </dependency>
+</dependencies>
+</project>
