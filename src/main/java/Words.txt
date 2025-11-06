@@ -1,2 +1,0 @@
-hello, my name is hadoop
-what is your name ?
