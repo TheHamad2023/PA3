@@ -23,7 +23,7 @@ public class PageRank {
         // create spark session
         SparkSession spark = SparkSession
                 .builder()
-                .appName("PageRank").master("local")
+                .appName("PageRank")
                 .getOrCreate();
 
         // load titles and give them ID's
@@ -91,15 +91,24 @@ public class PageRank {
             rank = propagatedRanks.reduceByKey(Double::sum);
         }
 
-        // format and write output for PageRank (No Taxation)
-        JavaPairRDD<Long, Tuple2<Double, String>> rankedWithTitles = rank.join(titles);
-        JavaRDD<String> formattedOutput = rankedWithTitles
-                .map(t -> "(" + t._2()._2() + "," + t._2()._1() + ")");
+        // join ranks with titles
+        JavaPairRDD<Long, Tuple2<Double, String>> rankWithTitle = rank.join(titles);
 
-        JavaRDD<String> sortedOutput = formattedOutput
-                .sortBy(line -> Double.parseDouble(line.substring(line.lastIndexOf(",") + 1, line.length() - 1)), false, 1);
+        // re-key by rank so we can sort by rank
+        JavaPairRDD<Double, String> byRank = rankWithTitle.mapToPair(t -> new Tuple2<>(t._2._1, t._2._2));
 
-        sortedOutput.saveAsTextFile("task1");
-        spark.stop();
+        // format as (title, pagerank), sort (descending), then only keep the top 10
+        JavaRDD<String> top10 =
+                byRank
+                        .sortByKey(false)
+                        .map(t -> t._2 + ", " + t._1)
+                        .zipWithIndex()
+                        .filter(p -> p._2 < 10)
+                        .keys();
+
+        // write output
+        String outputPath = "/PA3/task1-output";
+        // coalesce = just make one output file
+        top10.coalesce(1).saveAsTextFile(outputPath);
     }
 }
