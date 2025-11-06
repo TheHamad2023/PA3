@@ -59,40 +59,47 @@ public class PageRank {
                     return new Tuple2<>(from, outgoing);
                 })
                 .cache();
-        
+
         // Calculate 1/N, where N is number of pages
         Double initialRankValue = 1.0 / titles.count();
-        
-        // Populate RDD with key Long the page ID and and value Double the initialRankValue
-        JavaPairRDD<Long, Double> initialRank = titles.keys().mapToPair(k -> new Tuple2<>(k, initialRankValue));
-        
-        //Join the links RDD with initial ranks RDD to produce RDD with key: ID long,
-        // val: (rank Double and its outgoing links list<Long>)
-        JavaPairRdd<Long, Tuple2<Double, List<Long>>> joinedRdd = initialRank.join(links);
 
-        //Create new RDD key, val with the new propogated ranks
-        joinedRdd.flatMapToPair(page -> {
-            List<Long> outlinks = page._2._2;
+        // Populate RDD with key Long the page ID  and value Double the initialRankValue
+        JavaPairRDD<Long, Double> rank = titles.keys().mapToPair(k -> new Tuple2<>(k, initialRankValue));
 
-            //Calculate the share of the current page's rank to propogate to the next
-            //possible page by diving it over the propability of visiting said page
-            //Review slides 18-21 Week 6B for this
-            Double rankToPropogate = (Double) page._2._1 / outlinks.size();
+        // PageRank (No Taxation)
+        for (int i = 0; i < iterations; i++) {
+            JavaPairRDD<Long, Tuple2<Double, List<Long>>> joinedRdd = rank.join(links);
+            JavaPairRDD<Long, Double> propagatedRanks = joinedRdd.flatMapToPair(page -> {
+                // PageRank val
+                double currentRank = page._2()._1();
+                // List of outgoing links
+                List<Long> outlinks = page._2()._2();
+                List<Tuple2<Long, Double>> contributions = new ArrayList<>();
 
-            // ArrayList<Double> propogatedRanks = new ArrayList<>();
+                // if the page has outgoing links, distribute its rank
+                if (!outlinks.isEmpty()) {
+                    double share = currentRank / outlinks.size();
+                    for (Long dest : outlinks) {
+                        contributions.add(new Tuple2<>(dest, share));
+                    }
+                }
+                // if page has no outgoing links, don't do anything
+                return contributions.iterator();
+            });
 
-            // Create new List of key, vals where key is id of page that current is
-            //linked to and val is the new prpogated rank
-            List<Tuple2<Long, Double>> propogatedRanks = new ArrayList<>();
+            // sum the contributions to form the new ranks
+            rank = propagatedRanks.reduceByKey(Double::sum);
+        }
 
-            // For each outgoing link propogate a  new rank
-            for (Long id : outlinks) {
-                propogatedRanks.add(new Tuple2<>(id, rankToPropogate))
-            }
+        // format and write output for PageRank (No Taxation)
+        JavaPairRDD<Long, Tuple2<Double, String>> rankedWithTitles = rank.join(titles);
+        JavaRDD<String> formattedOutput = rankedWithTitles
+                .map(t -> "(" + t._2()._2() + "," + t._2()._1() + ")");
 
-            //Still not complete, need a way to sum up these poropogated ranks
-            //and save them as the new pagerank
-        });
+        JavaRDD<String> sortedOutput = formattedOutput
+                .sortBy(line -> Double.parseDouble(line.substring(line.lastIndexOf(",") + 1, line.length() - 1)), false, 1);
 
+        sortedOutput.saveAsTextFile("task1");
+        spark.stop();
     }
 }
