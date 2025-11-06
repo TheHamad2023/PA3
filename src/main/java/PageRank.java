@@ -59,5 +59,40 @@ public class PageRank {
                     return new Tuple2<>(from, outgoing);
                 })
                 .cache();
+        
+        // Calculate 1/N, where N is number of pages
+        Double initialRankValue = 1.0 / titles.count();
+        
+        // Populate RDD with key Long the page ID and and value Double the initialRankValue
+        JavaPairRDD<Long, Double> initialRank = titles.keys().mapToPair(k -> new Tuple2<>(k, initialRankValue));
+        
+        //Join the links RDD with initial ranks RDD to produce RDD with key: ID long,
+        // val: (rank Double and its outgoing links list<Long>)
+        JavaPairRdd<Long, Tuple2<Double, List<Long>>> joinedRdd = initialRank.join(links);
+
+        //Create new RDD key, val with the new propogated ranks
+        joinedRdd.flatMapToPair(page -> {
+            List<Long> outlinks = page._2._2;
+
+            //Calculate the share of the current page's rank to propogate to the next
+            //possible page by diving it over the propability of visiting said page
+            //Review slides 18-21 Week 6B for this
+            Double rankToPropogate = (Double) page._2._1 / outlinks.size();
+
+            // ArrayList<Double> propogatedRanks = new ArrayList<>();
+
+            // Create new List of key, vals where key is id of page that current is
+            //linked to and val is the new prpogated rank
+            List<Tuple2<Long, Double>> propogatedRanks = new ArrayList<>();
+
+            // For each outgoing link propogate a  new rank
+            for (Long id : outlinks) {
+                propogatedRanks.add(new Tuple2<>(id, rankToPropogate))
+            }
+
+            //Still not complete, need a way to sum up these poropogated ranks
+            //and save them as the new pagerank
+        });
+
     }
 }
