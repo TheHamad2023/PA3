@@ -10,16 +10,24 @@ public class PageRank {
 
     public static void main(String[] args) throws Exception {
         // check args
-        if (args.length != 2) {
-            System.err.println("Usage: PageRank <title_file> <links_file>");
+        if (args.length != 3) {
+            System.err.println("Usage: PageRank <Rank Type, \"1\" no taxation and \"2\" with taxation <title_file> <links_file>");
             System.exit(1);
         }
 
+        String noTax = "1";
+        String withTax = "2";
+
         // grab files and set num of iterations
-        String titleFile = args[0];
-        String linksFile = args[1];
+        String rankType = args[0];
+        String titleFile = args[1];
+        String linksFile = args[2];
         int iterations = 25;
 
+        if (!rankType.equals(noTax) && !rankType.equals(withTax)) {
+            System.err.println("Usage: PageRank <Rank Type, \"1\" no taxation and \"2\" with taxation <title_file> <links_file>");
+            System.exit(1);
+        }
         // create spark session
         SparkSession spark = SparkSession
                 .builder()
@@ -66,106 +74,107 @@ public class PageRank {
         // Populate RDD with key Long the page ID  and value Double the initialRankValue
         JavaPairRDD<Long, Double> rank = titles.keys().mapToPair(k -> new Tuple2<>(k, initialRankValue));
 
-        // PageRank (No Taxation)
-        for (int i = 0; i < iterations; i++) {
-            JavaPairRDD<Long, Tuple2<Double, List<Long>>> joinedRdd = rank.join(links);
-            JavaPairRDD<Long, Double> propagatedRanks = joinedRdd.flatMapToPair(page -> {
-                // PageRank val
-                double currentRank = page._2()._1();
-                // List of outgoing links
-                List<Long> outlinks = page._2()._2();
-                List<Tuple2<Long, Double>> contributions = new ArrayList<>();
+        if(rankType.equals(noTax)) {
 
-                // if the page has outgoing links, distribute its rank
-                if (!outlinks.isEmpty()) {
-                    double share = currentRank / outlinks.size();
-                    for (Long dest : outlinks) {
-                        contributions.add(new Tuple2<>(dest, share));
+            // PageRank (No Taxation)
+            for (int i = 0; i < iterations; i++) {
+                JavaPairRDD<Long, Tuple2<Double, List<Long>>> joinedRdd = rank.join(links);
+                JavaPairRDD<Long, Double> propagatedRanks = joinedRdd.flatMapToPair(page -> {
+                    // PageRank val
+                    double currentRank = page._2()._1();
+                    // List of outgoing links
+                    List<Long> outlinks = page._2()._2();
+                    List<Tuple2<Long, Double>> contributions = new ArrayList<>();
+
+                    // if the page has outgoing links, distribute its rank
+                    if (!outlinks.isEmpty()) {
+                        double share = currentRank / outlinks.size();
+                        for (Long dest : outlinks) {
+                            contributions.add(new Tuple2<>(dest, share));
+                        }
                     }
-                }
-                // if page has no outgoing links, don't do anything
-                return contributions.iterator();
-            });
+                    // if page has no outgoing links, don't do anything
+                    return contributions.iterator();
+                });
 
-            // sum the contributions to form the new ranks
-            rank = propagatedRanks.reduceByKey(Double::sum);
+                // sum the contributions to form the new ranks
+                rank = propagatedRanks.reduceByKey(Double::sum);
+            }
+
+            // join ranks with titles
+            JavaPairRDD<Long, Tuple2<Double, String>> rankWithTitle = rank.join(titles);
+
+            // re-key by rank so we can sort by rank
+            JavaPairRDD<Double, String> byRank = rankWithTitle.mapToPair(t -> new Tuple2<>(t._2._1, t._2._2));
+
+            // format as (title, pagerank), sort (descending), then only keep the top 10
+            JavaRDD<String> top10 =
+                    byRank
+                            .sortByKey(false)
+                            .map(t -> t._2 + ", " + t._1)
+                            .zipWithIndex()
+                            .filter(p -> p._2 < 10)
+                            .keys();
+
+            // write output
+            String outputPath = "/PA3/task1-output";
+            // coalesce = just make one output file
+            top10.coalesce(1).saveAsTextFile(outputPath);
+        
         }
+        else {
+            //PageRank with Taxation
+            for (int i = 0; i < iterations; i++) {
+                JavaPairRDD<Long, Tuple2<Double, List<Long>>> joinedRdd = rank.join(links);
+                JavaPairRDD<Long, Double> propagatedRanks = joinedRdd.flatMapToPair(page -> {
+                    // PageRank val
+                    double currentRank = page._2()._1();
+                    // List of outgoing links
+                    List<Long> outlinks = page._2()._2();
 
-        // join ranks with titles
-        JavaPairRDD<Long, Tuple2<Double, String>> rankWithTitle = rank.join(titles);
+                    List<Tuple2<Long, Double>> contributions = new ArrayList<>();
 
-        // re-key by rank so we can sort by rank
-        JavaPairRDD<Double, String> byRank = rankWithTitle.mapToPair(t -> new Tuple2<>(t._2._1, t._2._2));
-
-        // format as (title, pagerank), sort (descending), then only keep the top 10
-        JavaRDD<String> top10 =
-                byRank
-                        .sortByKey(false)
-                        .map(t -> t._2 + ", " + t._1)
-                        .zipWithIndex()
-                        .filter(p -> p._2 < 10)
-                        .keys();
-
-        // write output
-        String outputPath = "/PA3/task1-output";
-        // coalesce = just make one output file
-        top10.coalesce(1).saveAsTextFile(outputPath);
-
-
-
-        //PageRank with Taxation
-        rank = titles.keys().mapToPair(k -> new Tuple2<>(k, initialRankValue));
-
-        for (int i = 0; i < iterations; i++) {
-            JavaPairRDD<Long, Tuple2<Double, List<Long>>> joinedRdd = rank.join(links);
-            JavaPairRDD<Long, Double> propagatedRanks = joinedRdd.flatMapToPair(page -> {
-                // PageRank val
-                double currentRank = page._2()._1();
-                // List of outgoing links
-                List<Long> outlinks = page._2()._2();
-
-                List<Tuple2<Long, Double>> contributions = new ArrayList<>();
-
-                // if the page has outgoing links, distribute its rank
-                if (!outlinks.isEmpty()) {
-                    double share = currentRank / outlinks.size();
-                    for (Long dest : outlinks) {
-                        contributions.add(new Tuple2<>(dest, share));
+                    // if the page has outgoing links, distribute its rank
+                    if (!outlinks.isEmpty()) {
+                        double share = currentRank / outlinks.size();
+                        for (Long dest : outlinks) {
+                            contributions.add(new Tuple2<>(dest, share));
+                        }
                     }
-                }
-                // if page has no outgoing links, don't do anything
-                return contributions.iterator();
-            });
+                    // if page has no outgoing links, don't do anything
+                    return contributions.iterator();
+                });
 
-            
-            Double beta = 0.85;
-            Long numOfPages = titles.count();
+                
+                Double beta = 0.85;
+                Long numOfPages = titles.count();
 
-            // double[] e = new double[n];
+                // double[] e = new double[n];
 
-            // sum the contributions to form the new ranks
-            JavaPairRDD<Long, Double> summedRanks = propagatedRanks.reduceByKey(Double::sum);
-            rank = summedRanks.mapValues(v -> beta * v + (1.0 - beta) * 1.0 / numOfPages);
+                // sum the contributions to form the new ranks
+                JavaPairRDD<Long, Double> summedRanks = propagatedRanks.reduceByKey(Double::sum);
+                rank = summedRanks.mapValues(v -> beta * v + (1.0 - beta) * 1.0 / numOfPages);
+            }
+
+            // join taxed ranks with titles
+            JavaPairRDD<Long, Tuple2<Double, String>> taxedRankWithTitle = rank.join(titles);
+
+            // re-key by rank so we can sort by rank
+            JavaPairRDD<Double, String> byTaxedRank = taxedRankWithTitle.mapToPair(t -> new Tuple2<>(t._2._1, t._2._2));
+
+            JavaRDD<String> top10Taxed =
+                    byTaxedRank
+                            .sortByKey(false)
+                            .map(t -> t._2 + ", " + t._1)
+                            .zipWithIndex()
+                            .filter(p -> p._2 < 10)
+                            .keys();
+
+            // write output
+            String outputPath2 = "/PA3/task2-output";
+            // coalesce = just make one output file
+            top10Taxed.coalesce(1).saveAsTextFile(outputPath2);
         }
-
-        // join taxed ranks with titles
-        JavaPairRDD<Long, Tuple2<Double, String>> taxedRankWithTitle = rank.join(titles);
-
-        // re-key by rank so we can sort by rank
-        JavaPairRDD<Double, String> byTaxedRank = taxedRankWithTitle.mapToPair(t -> new Tuple2<>(t._2._1, t._2._2));
-
-        JavaRDD<String> top10Taxed =
-                byTaxedRank
-                        .sortByKey(false)
-                        .map(t -> t._2 + ", " + t._1)
-                        .zipWithIndex()
-                        .filter(p -> p._2 < 10)
-                        .keys();
-
-        // write output
-        String outputPath2 = "/PA3/task2-output";
-        // coalesce = just make one output file
-        top10Taxed.coalesce(1).saveAsTextFile(outputPath2);
 
     }
 }
