@@ -110,5 +110,62 @@ public class PageRank {
         String outputPath = "/PA3/task1-output";
         // coalesce = just make one output file
         top10.coalesce(1).saveAsTextFile(outputPath);
+
+
+
+        //PageRank with Taxation
+        rank = titles.keys().mapToPair(k -> new Tuple2<>(k, initialRankValue));
+
+        for (int i = 0; i < iterations; i++) {
+            JavaPairRDD<Long, Tuple2<Double, List<Long>>> joinedRdd = rank.join(links);
+            JavaPairRDD<Long, Double> propagatedRanks = joinedRdd.flatMapToPair(page -> {
+                // PageRank val
+                double currentRank = page._2()._1();
+                // List of outgoing links
+                List<Long> outlinks = page._2()._2();
+
+                List<Tuple2<Long, Double>> contributions = new ArrayList<>();
+
+                // if the page has outgoing links, distribute its rank
+                if (!outlinks.isEmpty()) {
+                    double share = currentRank / outlinks.size();
+                    for (Long dest : outlinks) {
+                        contributions.add(new Tuple2<>(dest, share));
+                    }
+                }
+                // if page has no outgoing links, don't do anything
+                return contributions.iterator();
+            });
+
+            
+            Double beta = 0.85;
+            Long numOfPages = titles.count();
+
+            // double[] e = new double[n];
+
+            // sum the contributions to form the new ranks
+            JavaPairRDD<Long, Double> summedRanks = propagatedRanks.reduceByKey(Double::sum);
+            rank = summedRanks.mapValues(v -> beta * v + (1.0 - beta) * 1.0 / numOfPages);
+        }
+
+        // join taxed ranks with titles
+        JavaPairRDD<Long, Tuple2<Double, String>> taxedRankWithTitle = rank.join(titles);
+
+        // re-key by rank so we can sort by rank
+        JavaPairRDD<Double, String> byTaxedRank = taxedRankWithTitle.mapToPair(t -> new Tuple2<>(t._2._1, t._2._2));
+
+        JavaRDD<String> top10Taxed =
+                byTaxedRank
+                        .sortByKey(false)
+                        .map(t -> t._2 + ", " + t._1)
+                        .zipWithIndex()
+                        .filter(p -> p._2 < 10)
+                        .keys();
+
+        // write output
+        String outputPath2 = "/PA3/task2-output";
+        // coalesce = just make one output file
+        top10Taxed.coalesce(1).saveAsTextFile(outputPath2);
+
     }
 }
